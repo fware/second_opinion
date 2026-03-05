@@ -1,6 +1,5 @@
 import streamlit as st
 import google.generativeai as genai
-from pypdf import PdfReader
 import pandas as pd
 import PIL.Image
 import json
@@ -8,9 +7,12 @@ import time
 import os
 import difflib  # used for fuzzy string comparisons
 import io
+from pypdf import PdfReader
+from google.api_core.exceptions import ResourceExhausted
+
 
 # --- Configuration & Setup ---
-st.set_page_config(page_title="Rallye Auto: Second Opinion", page_icon="🚗", layout="centered")
+st.set_page_config(page_title="Independent Auto: Second Opinion", page_icon="🚗", layout="centered")
 
 # In production, use st.secrets. For local testing, you can set it here or in your env.
 API_KEY = st.secrets.get("GEMINI_API_KEY")
@@ -74,7 +76,7 @@ def parse_estimate_with_llm(raw_text):
         return None
 
 @st.cache_data(show_spinner=False)
-def parse_document_with_llm_v2(file_bytes, file_type):
+def parse_document_with_llm_v2(file_bytes):
     """
     Parses a PDF or Image estimate and returns a structured Python Dictionary.
     Guarantees 'vehicle' and 'repairs' keys are present and correctly populated.
@@ -103,40 +105,52 @@ def parse_document_with_llm_v2(file_bytes, file_type):
     }
     """
 
-    try:
-        # 2. Route based on file type
-        if file_type == "application/pdf":
-            # Handle PDF (Extract text first using your helper)
-            pdf_file = io.BytesIO(file_bytes)
-            raw_text = extract_text_from_pdf(pdf_file)
-            response = model.generate_content([prompt, raw_text])
-        else:
-            # Handle Image (Pass the image object directly)
-            img_file = io.BytesIO(file_bytes)
-            img = PIL.Image.open(img_file)
-            response = model.generate_content([prompt, img])
+    max_retries = 3
+    base_delay = 2 # seconds to wait on first failure
+
+    for attempt in range(max_retries):
+        try:
+            # Route based on file type
+            if uploaded_file.type == "application/pdf":
+                raw_text = extract_text_from_pdf(uploaded_file)
+                response = model.generate_content([prompt, raw_text])
+            else:
+                img = PIL.Image.open(uploaded_file)
+                response = model.generate_content([prompt, img])
             
-        # 3. Clean the response string from the LLM
+            # If successful, break out of the retry loop and continue processing
+            break
+            
+        except ResourceExhausted as e:
+            if attempt < max_retries - 1:
+                # Exponential backoff: waits 2s, then 4s, then 8s
+                sleep_time = base_delay * (2 ** attempt) 
+                st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(sleep_time)
+            else:
+                st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
+                return None
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
+            return None
+    
+    # --- Proceed to JSON parsing ONLY if the loop broke successfully ---
+    try:
         raw_json_string = response.text.strip()
         
-        # Remove markdown code blocks if the LLM ignores instructions
         if raw_json_string.startswith("```json"):
             raw_json_string = raw_json_string[7:]
         if raw_json_string.endswith("```"):
             raw_json_string = raw_json_string[:-3]
             
-        # 4. Convert to Python Dictionary
         parsed_dict = json.loads(raw_json_string.strip())
         
-        # 5. SAFETY CHECK: Ensure we have a valid dictionary and inject defaults if the LLM hallucinated
         if not isinstance(parsed_dict, dict):
             parsed_dict = {}
 
-        # If vehicle key is missing, or the value is empty/null, force it to Unknown Vehicle
         if "vehicle" not in parsed_dict or not parsed_dict["vehicle"]:
             parsed_dict["vehicle"] = "Unknown Vehicle"
             
-        # Ensure repairs is always a list, even if empty
         if "repairs" not in parsed_dict:
             parsed_dict["repairs"] = []
             
@@ -144,13 +158,7 @@ def parse_document_with_llm_v2(file_bytes, file_type):
 
     except json.JSONDecodeError as e:
         st.error("Failed to parse AI response. The document might be too blurry or unreadable.")
-        # Print the raw text to terminal so you can debug why it failed
-        print(f"DEBUG: Raw AI Output causing JSON error:\n{response.text}") 
-        return None
-    except Exception as e:
-        st.error(f"An error occurred during document processing: {e}")
-        return None
-    
+        return None    
 
 def parse_sophisticated_estimate_with_llm(raw_text):
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -245,7 +253,7 @@ def service_matches(db_service: str, service_name: str, threshold: float = 0.6) 
 
 
 # --- Streamlit UI ---
-st.title("🚗 Rallye Auto: Second Opinion Engine")
+st.title("🚗 Independent Auto: Second Opinion Engine")
 st.markdown("Upload your  estimate to see if we can beat their price.")
 
 # Update the file uploader to accept images
@@ -254,58 +262,69 @@ uploaded_file = st.file_uploader(
     type=["pdf", "jpg", "jpeg", "png"]
 )
 
+
+
+# --- Initialize Streamlit Multi-File Memory ---
+if "estimate_cache" not in st.session_state:
+    # Create an empty dictionary to hold all processed files
+    st.session_state.estimate_cache = {}
+
 if uploaded_file is not None:
+    file_name = uploaded_file.name
+    
     # Preview the image if it's a photo
     if uploaded_file.type != "application/pdf":
         st.image(uploaded_file, caption="Uploaded Estimate", use_container_width=True)
 
-    with st.spinner("Extracting Work current estimate data and calculating our price..."):
-        # 1. Extract Text
-        # raw_text = extract_text_from_pdf(uploaded_file)
+    # 1. Check if we have already processed THIS specific file today
+    if file_name in st.session_state.estimate_cache:
+        st.success(f"⚡ Loaded {file_name} from cache! (Saved an API call)")
+        estimate_data = st.session_state.estimate_cache[file_name]
 
-        # Read the bytes so Streamlit can cached them easily.
-        file_bytes = uploaded_file.getvalue()
-
-        # Pass the bytes to your function (make sure your function uses io.BytesIO(file_bytes) for PIL/PyPDF)
-        # OR just cache the LLM response itself.
-        
-        # 2. Parse with LLM
-        estimate_data = parse_document_with_llm_v2(file_bytes, uploaded_file.type)
-        
-        if estimate_data:
-            st.success(f"Estimate parsed successfully for: **{estimate_data.get('vehicle', 'Unknown Vehicle')}**")
+    # 2. If it's a new file, call the AI and save it to the dictionary
+    else:
+        with st.spinner("Extracting current estimate data and calculating our price..."):
+            estimate_data = parse_document_with_llm_v2(uploaded_file)
             
-            # 3. Build Comparison Data
-            comparison_results = []
-            total_dealer = 0
-            total_rallye = 0
-           
-            with st.status("Comparing prices with Rallye Auto database...", expanded=True) as status:
-                for item in estimate_data.get("repairs", []):
-                    service_name = item.get("service", "").lower()
-                    dealer_price = item.get("quoted_price", 0.0)
-                    # st.write(f"Processing: {service_name.title()} - Dealer Quote: ${dealer_price:.2f}") # Debug line to show each service being processed
-                    total_dealer += dealer_price
-                    
-                    # Basic matching logic against our mock DB, now with improved partial/fuzzy matching
-                    confidence_label = "No Match 🔴" # Default
-                    rallye_price = "Custom Quote Needed"
-                    
-                    for db_service, db_price in MOCK_PRICING_DB.items():
-                        is_match, conf_score = service_matches_with_score(db_service, service_name)
-                        if is_match:
-                            rallye_price = db_price
-                            total_rallye += rallye_price
-                            confidence_label = conf_score
-                            break   
+            # Save it to memory so we never process this filename again this session
+            if estimate_data:
+                st.session_state.estimate_cache[file_name] = estimate_data  
 
-                    comparison_results.append({
-                        "Service": service_name.title(),
-                        "Dealer Quote": f"${dealer_price:.2f}" if isinstance(dealer_price, (int, float)) else dealer_price,
-                        "Rallye Estimate": f"${rallye_price:.2f}" if isinstance(rallye_price, (int, float)) else rallye_price,
-                        "Match Confidence": confidence_label # Add the confidence label to the results for display
-                    })
-                status.update(label="Comparison Complete!", state="complete", expanded=True)
+    # 3. Proceed normally!                  
+    if estimate_data:
+        st.success(f"Estimate parsed successfully for: **{estimate_data.get('vehicle', 'Unknown Vehicle')}**")
+            
+        # 3. Build Comparison Data
+        comparison_results = []
+        total_dealer = 0
+        total_Independent = 0
+         
+        with st.status("Comparing prices with Independent Auto database...", expanded=True) as status:
+            for item in estimate_data.get("repairs", []):
+                service_name = item.get("service", "").lower()
+                dealer_price = item.get("quoted_price", 0.0)
+                # st.write(f"Processing: {service_name.title()} - Dealer Quote: ${dealer_price:.2f}") # Debug line to show each service being processed
+                total_dealer += dealer_price
+                  
+                # Basic matching logic against our mock DB, now with improved partial/fuzzy matching
+                confidence_label = "No Match 🔴" # Default
+                Independent_price = "Custom Quote Needed"
+                    
+                for db_service, db_price in MOCK_PRICING_DB.items():
+                    is_match, conf_score = service_matches_with_score(db_service, service_name)
+                    if is_match:
+                        Independent_price = db_price
+                        total_Independent += Independent_price
+                        confidence_label = conf_score
+                        break   
+
+                comparison_results.append({
+                    "Service": service_name.title(),
+                    "Dealer Quote": f"${dealer_price:.2f}" if isinstance(dealer_price, (int, float)) else dealer_price,
+                    "Independent Estimate": f"${Independent_price:.2f}" if isinstance(Independent_price, (int, float)) else Independent_price,
+                    "Match Confidence": confidence_label # Add the confidence label to the results for display
+                })
+            status.update(label="Comparison Complete!", state="complete", expanded=True)
             
 # 4. Display Results
             st.subheader("Cost Comparison")
@@ -324,24 +343,24 @@ if uploaded_file is not None:
                 st.warning("⚠️ **No Dealership Prices Detected**")
                 st.write("We successfully read the recommended repairs, but we didn't find any quoted prices on the document you uploaded.")
                 
-                if total_rallye > 0:
-                    st.success(f"Good news! We went ahead and pulled Rallye Auto's estimates anyway. We estimate this work will cost around **${total_rallye:.2f}**.")
+                if total_Independent > 0:
+                    st.success(f"Good news! We went ahead and pulled Independent Auto's estimates anyway. We estimate this work will cost around **${total_Independent:.2f}**.")
                     show_form = True
-                    alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Rallye estimate: ${rallye_total:.2f}."
+                    alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Independent estimate: ${Independent_total:.2f}."
                 else:
-                    st.info("Rallye Auto will need to provide a custom quote for these specific items.")
+                    st.info("Independent Auto will need to provide a custom quote for these specific items.")
                     show_form = True
                     alert_msg_template = "New Lead! {name} ({phone}) needs a custom quote for a {vehicle} (unpriced upload)."
 
             # Scenario B: Standard Comparison & Savings
-            elif total_rallye > 0 and total_dealer > total_rallye:
-                savings = total_dealer - total_rallye
+            elif total_Independent > 0 and total_dealer > total_Independent:
+                savings = total_dealer - total_Independent
                 st.success(f"🎉 We estimate we can save you around **${savings:.2f}** on these repairs!")
                 show_form = True
                 alert_msg_template = "New Lead! {name} ({phone}) wants a second opinion on a {vehicle}. Estimated savings: ${savings:.2f}."
 
             # Scenario C: Dealership is somehow cheaper or exactly the same
-            elif total_rallye > 0 and total_dealer > 0 and total_dealer <= total_rallye:
+            elif total_Independent > 0 and total_dealer > 0 and total_dealer <= total_Independent:
                 st.info("It looks like the dealership quote is highly competitive for these specific services.")
                 show_form = True
                 alert_msg_template = "New Lead! {name} ({phone}) checked prices for a {vehicle}. Dealer quote was competitive."
@@ -351,13 +370,13 @@ if uploaded_file is not None:
                 st.subheader("Lock in this Estimate / Get a Custom Quote")
                 
                 with st.form("lead_capture_form"):
-                    st.write("Enter your details and Rallye Auto will reach out to confirm your appointment.")
+                    st.write("Enter your details and Independent Auto will reach out to confirm your appointment.")
                     
                     customer_name = st.text_input("Full Name")
                     customer_phone = st.text_input("Phone Number (for SMS)")
                     
                     # The form submit button handles the actual action (removed the loose button you had at the end)
-                    submitted = st.form_submit_button("Send to Rallye Auto", type="primary")
+                    submitted = st.form_submit_button("Send to Independent Auto", type="primary")
                     
                     if submitted:
                         if customer_name and customer_phone:
@@ -366,16 +385,16 @@ if uploaded_file is not None:
                             
                             # 2. Format the SMS string based on which scenario triggered the form
                             if "savings" in alert_msg_template:
-                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_rallye))
-                            elif "rallye_total" in alert_msg_template:
-                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, rallye_total=total_rallye)
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_Independent))
+                            elif "Independent_total" in alert_msg_template:
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, Independent_total=total_Independent)
                             else:
                                 alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name)
                             
                             # 3. Trigger the notification (Make sure you have the send_sms_alert function defined in your script!)
                             # send_sms_alert("+14695582111", alert_msg) 
                             
-                            st.success("Success! Rallye Auto has received your estimate. They will text or call you shortly.")
+                            st.success("Success! Independent Auto has received your estimate. They will text or call you shortly.")
                         else:
                             st.warning("Please provide your name and phone number.")
 
