@@ -7,6 +7,7 @@ import json
 import time
 import os
 import difflib  # used for fuzzy string comparisons
+import io
 
 # --- Configuration & Setup ---
 st.set_page_config(page_title="Rallye Auto: Second Opinion", page_icon="🚗", layout="centered")
@@ -72,8 +73,8 @@ def parse_estimate_with_llm(raw_text):
         st.error(f"Error parsing estimate: {e}")
         return None
 
-
-def parse_document_with_llm_v2(uploaded_file):
+@st.cache_data(show_spinner=False)
+def parse_document_with_llm_v2(file_bytes, file_type):
     """
     Parses a PDF or Image estimate and returns a structured Python Dictionary.
     Guarantees 'vehicle' and 'repairs' keys are present and correctly populated.
@@ -104,13 +105,15 @@ def parse_document_with_llm_v2(uploaded_file):
 
     try:
         # 2. Route based on file type
-        if uploaded_file.type == "application/pdf":
+        if file_type == "application/pdf":
             # Handle PDF (Extract text first using your helper)
-            raw_text = extract_text_from_pdf(uploaded_file)
+            pdf_file = io.BytesIO(file_bytes)
+            raw_text = extract_text_from_pdf(pdf_file)
             response = model.generate_content([prompt, raw_text])
         else:
             # Handle Image (Pass the image object directly)
-            img = PIL.Image.open(uploaded_file)
+            img_file = io.BytesIO(file_bytes)
+            img = PIL.Image.open(img_file)
             response = model.generate_content([prompt, img])
             
         # 3. Clean the response string from the LLM
@@ -259,9 +262,15 @@ if uploaded_file is not None:
     with st.spinner("Extracting Work current estimate data and calculating our price..."):
         # 1. Extract Text
         # raw_text = extract_text_from_pdf(uploaded_file)
+
+        # Read the bytes so Streamlit can cached them easily.
+        file_bytes = uploaded_file.getvalue()
+
+        # Pass the bytes to your function (make sure your function uses io.BytesIO(file_bytes) for PIL/PyPDF)
+        # OR just cache the LLM response itself.
         
         # 2. Parse with LLM
-        estimate_data = parse_document_with_llm_v2(uploaded_file)
+        estimate_data = parse_document_with_llm_v2(file_bytes, uploaded_file.type)
         
         if estimate_data:
             st.success(f"Estimate parsed successfully for: **{estimate_data.get('vehicle', 'Unknown Vehicle')}**")
@@ -298,40 +307,76 @@ if uploaded_file is not None:
                     })
                 status.update(label="Comparison Complete!", state="complete", expanded=True)
             
-            # 4. Display Results
+# 4. Display Results
             st.subheader("Cost Comparison")
             df = pd.DataFrame(comparison_results)
             st.dataframe(df, use_container_width=True)
             
-            # 5. The "Hook" (Call to Action)
-            if total_rallye > 0 and total_dealer > total_rallye:
+            # 5. The "Hook" (Call to Action & Error Handling)
+            st.markdown("---")
+            
+            # Initialize variables to safely handle the lead capture form
+            show_form = False
+            alert_msg_template = ""
+            
+            # Scenario A: We found repairs, but no dealership prices
+            if len(estimate_data.get("repairs", [])) > 0 and total_dealer == 0:
+                st.warning("⚠️ **No Dealership Prices Detected**")
+                st.write("We successfully read the recommended repairs, but we didn't find any quoted prices on the document you uploaded.")
+                
+                if total_rallye > 0:
+                    st.success(f"Good news! We went ahead and pulled Rallye Auto's estimates anyway. We estimate this work will cost around **${total_rallye:.2f}**.")
+                    show_form = True
+                    alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Rallye estimate: ${rallye_total:.2f}."
+                else:
+                    st.info("Rallye Auto will need to provide a custom quote for these specific items.")
+                    show_form = True
+                    alert_msg_template = "New Lead! {name} ({phone}) needs a custom quote for a {vehicle} (unpriced upload)."
+
+            # Scenario B: Standard Comparison & Savings
+            elif total_rallye > 0 and total_dealer > total_rallye:
                 savings = total_dealer - total_rallye
-                st.info(f"🎉 We estimate we can save you around **${savings:.2f}** on these repairs.")
+                st.success(f"🎉 We estimate we can save you around **${savings:.2f}** on these repairs!")
+                show_form = True
+                alert_msg_template = "New Lead! {name} ({phone}) wants a second opinion on a {vehicle}. Estimated savings: ${savings:.2f}."
+
+            # Scenario C: Dealership is somehow cheaper or exactly the same
+            elif total_rallye > 0 and total_dealer > 0 and total_dealer <= total_rallye:
+                st.info("It looks like the dealership quote is highly competitive for these specific services.")
+                show_form = True
+                alert_msg_template = "New Lead! {name} ({phone}) checked prices for a {vehicle}. Dealer quote was competitive."
+
+            # --- Lead Capture Form ---
+            if show_form:
+                st.subheader("Lock in this Estimate / Get a Custom Quote")
                 
-                st.markdown("---")
-                st.subheader("Lock in this Estimate")
-                
-                # Use a Streamlit form to capture user details
                 with st.form("lead_capture_form"):
                     st.write("Enter your details and Rallye Auto will reach out to confirm your appointment.")
                     
                     customer_name = st.text_input("Full Name")
                     customer_phone = st.text_input("Phone Number (for SMS)")
                     
-                    # The form submit button
+                    # The form submit button handles the actual action (removed the loose button you had at the end)
                     submitted = st.form_submit_button("Send to Rallye Auto", type="primary")
                     
                     if submitted:
                         if customer_name and customer_phone:
-                            # Construct the alert message
-                            alert_msg = f"New Lead! {customer_name} ({customer_phone}) wants a second opinion on a {estimate_data.get('vehicle')}. Estimated savings: ${savings:.2f}."
+                            # 1. Grab the vehicle safely
+                            vehicle_name = estimate_data.get('vehicle', 'Unknown Vehicle')
                             
-                            # Trigger the notification (function defined below)
-                            send_sms_alert("+14695582111", alert_msg) # Replace with Rallye's actual phone number
+                            # 2. Format the SMS string based on which scenario triggered the form
+                            if "savings" in alert_msg_template:
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_rallye))
+                            elif "rallye_total" in alert_msg_template:
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, rallye_total=total_rallye)
+                            else:
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name)
+                            
+                            # 3. Trigger the notification (Make sure you have the send_sms_alert function defined in your script!)
+                            # send_sms_alert("+14695582111", alert_msg) 
                             
                             st.success("Success! Rallye Auto has received your estimate. They will text or call you shortly.")
                         else:
                             st.warning("Please provide your name and phone number.")
-
 
             st.button("Book an Appointment to Lock in this Estimate", type="primary")
