@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai.errors import ClientError
 import pandas as pd
 import PIL.Image
 import json
@@ -8,33 +9,48 @@ import os
 import difflib  # used for fuzzy string comparisons
 import io
 from pypdf import PdfReader
-from google.api_core.exceptions import ResourceExhausted
 
 
 # --- Configuration & Setup ---
-st.set_page_config(page_title="Independent Auto: Second Opinion", page_icon="🚗", layout="centered")
-
-# In production, use st.secrets. For local testing, you can set it here or in your env.
-API_KEY = st.secrets.get("GEMINI_API_KEY")
-genai.configure(api_key=API_KEY)
+st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
 
 # --- Mock Database for Independent Shop Pricing ---
+@st.cache_data
+def load_pricing_db():
+    """
+    Loads pricing from a local CSV. 
+    Streamlit will automatically reload this if pricing.csv is modified!
+    """
+    try:
+        df = pd.read_csv("pricing.csv", skipinitialspace=True)
+
+        # Clean up any accidental spaces in the column names
+        # df.columns = df.columns.str.strip()
+
+        # We lower() the keys here so your fuzzy matching stays fast
+        return dict(zip(df['Service Name'].str.lower(), df['Price']))
+    except FileNotFoundError:
+        st.error("Pricing database file not found!")
+        return {}
+
+# Replace your hardcoded MOCK_PRICING_DB with this call:
+MOCK_PRICING_DB = load_pricing_db()
 # In a real app, this would be a Supabase/Postgres query based on make/model/service.
-MOCK_PRICING_DB = {
-    "Rear Shock Absorber Replacement": 449.99,
-    "brake pads replacement": 219.99,
-    "12v battery replacement": 179.99,
-    "synthetic oil change": 75.00,
-    "wiper blades - front": 24.99,
-    "four wheel alignment": 129.99,
-    "Alternator Replacement": 514.99,
-    "Spark Plugs Replacement": 109.99,
-    "Starter Motor Replacement": 359.99,
-    "Front Brake Replacement": 179.99,
-    "Rear Brake Replacement": 189.99,
-    "AC Compressor Replacement": 699.99,
-    "Clutch Assembly Replacement": 2899.99,
-}
+# MOCK_PRICING_DB = {
+#     "Rear Shock Absorber Replacement": 449.99,
+#     "brake pads replacement": 219.99,
+#     "12v battery replacement": 179.99,
+#     "synthetic oil change": 75.00,
+#     "wiper blades - front": 24.99,
+#     "four wheel alignment": 129.99,
+#     "Alternator Replacement": 514.99,
+#     "Spark Plugs Replacement": 109.99,
+#     "Starter Motor Replacement": 359.99,
+#     "Front Brake Replacement": 179.99,
+#     "Rear Brake Replacement": 189.99,
+#     "AC Compressor Replacement": 699.99,
+#     "Clutch Assembly Replacement": 2899.99,
+# }
 
 # --- Core Functions ---
 def extract_text_from_pdf(uploaded_file):
@@ -76,14 +92,14 @@ def parse_estimate_with_llm(raw_text):
         return None
 
 @st.cache_data(show_spinner=False)
-def parse_document_with_llm_v2(file_bytes):
+def parse_document_with_llm_v2(file_bytes, file_type):
     """
     Parses a PDF or Image estimate and returns a structured Python Dictionary.
-    Guarantees 'vehicle' and 'repairs' keys are present and correctly populated.
+    Updated to use the new google-genai SDK.
     """
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # 1. Initialize the new Client
+    client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY"))
     
-    # 1. Strict prompt engineering to enforce the schema and rules
     prompt = """
     You are an expert Automotive Service Estimator. Extract the vehicle information and repair line items from the provided document.
     
@@ -106,35 +122,49 @@ def parse_document_with_llm_v2(file_bytes):
     """
 
     max_retries = 3
-    base_delay = 2 # seconds to wait on first failure
+    base_delay = 2 
 
     for attempt in range(max_retries):
         try:
-            # Route based on file type
-            if uploaded_file.type == "application/pdf":
-                raw_text = extract_text_from_pdf(uploaded_file)
-                response = model.generate_content([prompt, raw_text])
+            # 2. Route based on file type using the new client syntax
+            if file_type == "application/pdf":
+                # Assuming extract_text_from_pdf can accept raw bytes via io.BytesIO
+                import io
+                raw_text = extract_text_from_pdf(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, raw_text]
+                )
             else:
-                img = PIL.Image.open(uploaded_file)
-                response = model.generate_content([prompt, img])
+                import io
+                import PIL.Image
+                img = PIL.Image.open(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, img]
+                )
             
-            # If successful, break out of the retry loop and continue processing
-            break
+            break # Break out of loop if successful
             
-        except ResourceExhausted as e:
-            if attempt < max_retries - 1:
-                # Exponential backoff: waits 2s, then 4s, then 8s
-                sleep_time = base_delay * (2 ** attempt) 
-                st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(sleep_time)
+        except ClientError as e:
+            # 3. Catch the new 429 Rate Limit Error
+            if e.code == 429:
+                if attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt) 
+                    st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(sleep_time)
+                else:
+                    st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
+                    return None
             else:
-                st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
+                st.error(f"API Error: {e.message}")
                 return None
         except Exception as e:
             st.error(f"An unexpected error occurred: {e}")
             return None
     
-    # --- Proceed to JSON parsing ONLY if the loop broke successfully ---
+    # 4. JSON parsing logic stays exactly the same!
     try:
         raw_json_string = response.text.strip()
         
@@ -143,6 +173,7 @@ def parse_document_with_llm_v2(file_bytes):
         if raw_json_string.endswith("```"):
             raw_json_string = raw_json_string[:-3]
             
+        import json
         parsed_dict = json.loads(raw_json_string.strip())
         
         if not isinstance(parsed_dict, dict):
@@ -156,9 +187,10 @@ def parse_document_with_llm_v2(file_bytes):
             
         return parsed_dict
 
-    except json.JSONDecodeError as e:
+    except Exception as e:
         st.error("Failed to parse AI response. The document might be too blurry or unreadable.")
-        return None    
+        return None
+
 
 def parse_sophisticated_estimate_with_llm(raw_text):
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -262,8 +294,6 @@ uploaded_file = st.file_uploader(
     type=["pdf", "jpg", "jpeg", "png"]
 )
 
-
-
 # --- Initialize Streamlit Multi-File Memory ---
 if "estimate_cache" not in st.session_state:
     # Create an empty dictionary to hold all processed files
@@ -284,7 +314,8 @@ if uploaded_file is not None:
     # 2. If it's a new file, call the AI and save it to the dictionary
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
-            estimate_data = parse_document_with_llm_v2(uploaded_file)
+            file_bytes = uploaded_file.getvalue()
+            estimate_data = parse_document_with_llm_v2(file_bytes, uploaded_file.type)
             
             # Save it to memory so we never process this filename again this session
             if estimate_data:
