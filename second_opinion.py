@@ -73,13 +73,13 @@ with st.sidebar:
         # Convert dictionary to DataFrame for a clean visual table
         display_df = pd.DataFrame(list(MOCK_PRICING_DB.items()), columns=["Service", "Price"])
         display_df['Price'] = display_df['Price'].apply(lambda x: f"${float(x):.2f}")
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        st.dataframe(display_df, hide_index=True, width='stretch')
 
     st.markdown("---")
     
     # 3. Clear Cache Button
     st.write("**Testing & Debugging:**")
-    if st.button("🗑️ Clear Active Estimates", use_container_width=True):
+    if st.button("🗑️ Clear Active Estimates", width='stretch'):
         st.session_state.estimate_cache = {}
         st.cache_data.clear()
         st.success("Cache cleared! The next upload will force a fresh AI analysis.")
@@ -290,35 +290,6 @@ def service_matches_with_score(db_service: str, service_name: str, threshold: fl
     return False, "None 🔴"
 
 
-def service_matches(db_service: str, service_name: str, threshold: float = 0.6) -> bool:
-    """Return True when two service descriptions appear to refer to the same repair.
-
-    Matching strategy:
-    1. case‑insensitive substring check (existing behaviour)
-    2. word overlap – at least two words in common
-    3. fuzzy ratio from difflib (default threshold 0.6, tune as needed)
-
-    This handles examples like
-        db_service="wiper blades front"
-        service_name="Front Wiper Blade Replacement"
-    because they share the words "wiper" and "front" and the overall similarity is high.
-    """
-    db = db_service.lower()
-    name = service_name.lower()
-    if db in name or name in db:
-        return True
-
-    db_words = set(db.split())
-    name_words = set(name.split())
-    if len(db_words & name_words) >= 2:
-        return True
-
-    if difflib.SequenceMatcher(None, db, name).ratio() >= threshold:
-        return True
-
-    return False
-
-
 # Update the file uploader to accept images
 uploaded_file = st.file_uploader(
     "Upload Dealership Estimate (PDF or Photo)", 
@@ -335,7 +306,7 @@ if uploaded_file is not None:
     
     # Preview the image if it's a photo
     if uploaded_file.type != "application/pdf":
-        st.image(uploaded_file, caption="Uploaded Estimate", use_container_width=True)
+        st.image(uploaded_file, caption="Uploaded Estimate", width='stretch')
 
     # 1. Check if we have already processed THIS specific file today
     if file_name in st.session_state.estimate_cache:
@@ -367,31 +338,45 @@ if uploaded_file is not None:
                 dealer_price = item.get("quoted_price", 0.0)
                 # st.write(f"Processing: {service_name.title()} - Dealer Quote: ${dealer_price:.2f}") # Debug line to show each service being processed
                 total_dealer += dealer_price
-                  
-                # Basic matching logic against our mock DB, now with improved partial/fuzzy matching
-                confidence_label = "No Match 🔴" # Default
-                Independent_price = "Custom Quote Needed"
-                    
-                for db_service, db_price in MOCK_PRICING_DB.items():
-                    is_match, conf_score = service_matches_with_score(db_service, service_name)
-                    if is_match:
-                        Independent_price = db_price
-                        total_Independent += Independent_price
-                        confidence_label = conf_score
-                        break   
 
+
+                best_score = 0
+                Independent_price = "Custom Quote Needed"
+                confidence_label = "No Match 🔴"                
+                # Check EVERY item in the database, don't just stop at the first one
+                for db_service, db_price in MOCK_PRICING_DB.items():
+                    is_match, conf_score = service_matches_with_score(db_service, service_name, threshold=0.7)
+                    
+                    # Convert your emoji labels into a mathematical weight
+                    weight_map = {"High 🟢": 3, "Good 🟡": 2, "Partial 🟠": 1, "None 🔴": 0}
+                    current_weight = weight_map.get(conf_score, 0)
+                    
+                    # If this match is BETTER than the last one we found, overwrite it
+                    if is_match and current_weight > best_score:
+                        best_score = current_weight
+                        Independent_price = db_price
+                        confidence_label = conf_score
+                        
+                        # If we hit a perfect 3, we don't need to keep searching
+                        if best_score == 3:
+                            break
+                            
+                # Add the absolute BEST result we found to the total
+                if isinstance(Independent_price, (int, float)):
+                    total_Independent += Independent_price
+                
                 comparison_results.append({
                     "Service": service_name.title(),
-                    "Dealer Quote": f"${dealer_price:.2f}" if isinstance(dealer_price, (int, float)) else dealer_price,
+                    "Dealer Quote": f"${dealer_price:.2f}" if dealer_price > 0 else "Unpriced",
                     "Independent Estimate": f"${Independent_price:.2f}" if isinstance(Independent_price, (int, float)) else Independent_price,
-                    "Match Confidence": confidence_label # Add the confidence label to the results for display
+                    "Match Confidence": confidence_label
                 })
             status.update(label="Comparison Complete!", state="complete", expanded=True)
             
             # 4. Display Results
             st.subheader("Cost Comparison")
             df = pd.DataFrame(comparison_results)
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width='stretch')
             
             # 5. The "Hook" (Call to Action & Error Handling)
             st.markdown("---")
