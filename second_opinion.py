@@ -14,6 +14,10 @@ from pypdf import PdfReader
 # --- Configuration & Setup ---
 st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
 
+
+
+
+
 # --- Mock Database for Independent Shop Pricing ---
 @st.cache_data
 def load_pricing_db():
@@ -35,22 +39,54 @@ def load_pricing_db():
 
 # Replace your hardcoded MOCK_PRICING_DB with this call:
 MOCK_PRICING_DB = load_pricing_db()
-# In a real app, this would be a Supabase/Postgres query based on make/model/service.
-# MOCK_PRICING_DB = {
-#     "Rear Shock Absorber Replacement": 449.99,
-#     "brake pads replacement": 219.99,
-#     "12v battery replacement": 179.99,
-#     "synthetic oil change": 75.00,
-#     "wiper blades - front": 24.99,
-#     "four wheel alignment": 129.99,
-#     "Alternator Replacement": 514.99,
-#     "Spark Plugs Replacement": 109.99,
-#     "Starter Motor Replacement": 359.99,
-#     "Front Brake Replacement": 179.99,
-#     "Rear Brake Replacement": 189.99,
-#     "AC Compressor Replacement": 699.99,
-#     "Clutch Assembly Replacement": 2899.99,
-# }
+
+# --- Sidebar: Admin Controls & Cache Management ---
+with st.sidebar:
+    st.header("⚙️ Admin Dashboard")
+    st.write("Update shop pricing database:")
+    
+    # 1. CSV Uploader
+    new_pricing_file = st.file_uploader("Upload New Pricing (CSV)", type=["csv"])
+    
+    if new_pricing_file is not None:
+        try:
+            # Read and clean the uploaded CSV (handles the space-after-comma issue automatically)
+            new_df = pd.read_csv(new_pricing_file, skipinitialspace=True)
+            new_df.columns = new_df.columns.str.strip()
+            
+            if 'Service Name' in new_df.columns and 'Price' in new_df.columns:
+                # Overwrite the local file
+                new_df.to_csv("pricing.csv", index=False)
+                st.success("✅ Pricing database updated live!")
+                # Clear cache so the app reloads the new CSV immediately
+                st.cache_data.clear() 
+            else:
+                st.error("CSV must contain 'Service Name' and 'Price' columns.")
+        except Exception as e:
+            st.error(f"Failed to process file: {e}")
+            
+    st.markdown("---")
+    
+    # 2. Display Active Pricing
+    st.write("**Current Active Pricing:**")
+    if MOCK_PRICING_DB:
+        # Convert dictionary to DataFrame for a clean visual table
+        display_df = pd.DataFrame(list(MOCK_PRICING_DB.items()), columns=["Service", "Price"])
+        display_df['Price'] = display_df['Price'].apply(lambda x: f"${float(x):.2f}")
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+    st.markdown("---")
+    
+    # 3. Clear Cache Button
+    st.write("**Testing & Debugging:**")
+    if st.button("🗑️ Clear Active Estimates", use_container_width=True):
+        st.session_state.estimate_cache = {}
+        st.cache_data.clear()
+        st.success("Cache cleared! The next upload will force a fresh AI analysis.")
+
+# --- Streamlit UI ---
+st.title("🚗 Independent Auto: Second Opinion Engine")
+st.markdown("Upload your  estimate to see if we can beat their price.")
 
 # --- Core Functions ---
 def extract_text_from_pdf(uploaded_file):
@@ -254,7 +290,6 @@ def service_matches_with_score(db_service: str, service_name: str, threshold: fl
     return False, "None 🔴"
 
 
-
 def service_matches(db_service: str, service_name: str, threshold: float = 0.6) -> bool:
     """Return True when two service descriptions appear to refer to the same repair.
 
@@ -283,10 +318,6 @@ def service_matches(db_service: str, service_name: str, threshold: float = 0.6) 
 
     return False
 
-
-# --- Streamlit UI ---
-st.title("🚗 Independent Auto: Second Opinion Engine")
-st.markdown("Upload your  estimate to see if we can beat their price.")
 
 # Update the file uploader to accept images
 uploaded_file = st.file_uploader(
@@ -357,7 +388,7 @@ if uploaded_file is not None:
                 })
             status.update(label="Comparison Complete!", state="complete", expanded=True)
             
-# 4. Display Results
+            # 4. Display Results
             st.subheader("Cost Comparison")
             df = pd.DataFrame(comparison_results)
             st.dataframe(df, use_container_width=True)
