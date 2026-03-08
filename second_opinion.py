@@ -85,7 +85,7 @@ with st.sidebar:
         st.success("Cache cleared! The next upload will force a fresh AI analysis.")
 
 # --- Streamlit UI ---
-st.title("🚗 Independent Auto: Second Opinion Engine")
+st.title("🚗 Independent Auto Service: Second Opinion")
 st.markdown("Upload your  estimate to see if we can beat their price.")
 
 # --- Core Functions ---
@@ -332,7 +332,7 @@ if uploaded_file is not None:
         total_dealer = 0
         total_Independent = 0
          
-        with st.status("Comparing prices with Independent Auto database...", expanded=True) as status:
+        with st.status("Comparing prices with Independent Auto Service database...", expanded=True) as status:
             for item in estimate_data.get("repairs", []):
                 service_name = item.get("service", "").lower()
                 dealer_price = item.get("quoted_price", 0.0)
@@ -391,11 +391,11 @@ if uploaded_file is not None:
                 st.write("We successfully read the recommended repairs, but we didn't find any quoted prices on the document you uploaded.")
                 
                 if total_Independent > 0:
-                    st.success(f"Good news! We went ahead and pulled Independent Auto's estimates anyway. We estimate this work will cost around **${total_Independent:.2f}**.")
+                    st.success(f"Good news! We went ahead and pulled Independent Auto Service's estimates anyway. We estimate this work will cost around **${total_Independent:.2f}**.")
                     show_form = True
                     alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Independent estimate: ${Independent_total:.2f}."
                 else:
-                    st.info("Independent Auto will need to provide a custom quote for these specific items.")
+                    st.info("Independent Auto Service will need to provide a custom quote for these specific items.")
                     show_form = True
                     alert_msg_template = "New Lead! {name} ({phone}) needs a custom quote for a {vehicle} (unpriced upload)."
 
@@ -417,13 +417,13 @@ if uploaded_file is not None:
                 st.subheader("Lock in this Estimate / Get a Custom Quote")
                 
                 with st.form("lead_capture_form"):
-                    st.write("Enter your details and Independent Auto will reach out to confirm your appointment.")
+                    st.write("Enter your details and Independent Auto Service will reach out to confirm your appointment.")
                     
                     customer_name = st.text_input("Full Name")
                     customer_phone = st.text_input("Phone Number (for SMS)")
                     
                     # The form submit button handles the actual action (removed the loose button you had at the end)
-                    submitted = st.form_submit_button("Send to Independent Auto", type="primary")
+                    submitted = st.form_submit_button("Send to Independent Auto Service", type="primary")
                     
                     if submitted:
                         if customer_name and customer_phone:
@@ -441,7 +441,7 @@ if uploaded_file is not None:
                             # 3. Trigger the notification (Make sure you have the send_sms_alert function defined in your script!)
                             # send_sms_alert("+14695582111", alert_msg) 
                             
-                            st.success("Success! Independent Auto has received your estimate. They will text or call you shortly.")
+                            st.success("Success! Independent Auto Service has received your estimate. They will text or call you shortly.")
                         else:
                             st.warning("Please provide your name and phone number.")
 
