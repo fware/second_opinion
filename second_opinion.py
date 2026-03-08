@@ -1,6 +1,7 @@
 import streamlit as st
 from google import genai
 from google.genai.errors import ClientError
+from fpdf import FPDF
 import pandas as pd
 import PIL.Image
 import json
@@ -13,9 +14,6 @@ from pypdf import PdfReader
 
 # --- Configuration & Setup ---
 st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
-
-
-
 
 
 # --- Mock Database for Independent Shop Pricing ---
@@ -265,7 +263,51 @@ def parse_sophisticated_estimate_with_llm(raw_text):
     except Exception as e:
         st.error(f"Logic Error: {e}")
         return None
+
+
+def create_pdf_report(vehicle_name, comparison_results, total_dealer, total_independent, savings):
+    """Generates a PDF estimate and returns it as raw bytes for Streamlit to download."""
+    pdf = FPDF()
+    pdf.add_page()
     
+    # Header
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt="Independent Auto - Estimate Comparison", ln=True, align='C')
+    
+    pdf.set_font("Arial", 'I', 12)
+    pdf.cell(200, 10, txt=f"Vehicle: {vehicle_name}", ln=True, align='C')
+    pdf.ln(10) # Add a line break
+    
+    # Table Header
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(90, 10, "Service", border=1)
+    pdf.cell(40, 10, "Dealer Quote", border=1, align='C')
+    pdf.cell(40, 10, "Our Estimate", border=1, align='C')
+    pdf.ln()
+    
+    # Table Rows
+    pdf.set_font("Arial", '', 10)
+    for row in comparison_results:
+        # Truncate long service names so they don't break the PDF table
+        service_text = row['Service'][:45] + "..." if len(row['Service']) > 45 else row['Service']
+        pdf.cell(90, 10, service_text, border=1)
+        pdf.cell(40, 10, str(row['Dealer Quote']), border=1, align='C')
+        pdf.cell(40, 10, str(row['Independent Estimate']), border=1, align='C')
+        pdf.ln()
+        
+    pdf.ln(10)
+    
+    # Totals & Savings
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(200, 10, txt=f"Dealership Total: ${total_dealer:.2f}", ln=True)
+    pdf.cell(200, 10, txt=f"Independent Auto Total: ${total_independent:.2f}", ln=True)
+    
+    if savings > 0:
+        pdf.set_text_color(0, 128, 0) # Green text for savings
+        pdf.cell(200, 10, txt=f"Estimated Savings: ${savings:.2f}", ln=True)
+        
+    # Output the PDF as a byte string (required for Streamlit's download button)
+    return pdf.output(dest='S').encode('latin-1')    
 
 # --- Utility Helpers ---
 def service_matches_with_score(db_service: str, service_name: str, threshold: float = 0.6):
@@ -330,7 +372,7 @@ if uploaded_file is not None:
         # 3. Build Comparison Data
         comparison_results = []
         total_dealer = 0
-        total_Independent = 0
+        total_independent = 0
          
         with st.status("Comparing prices with Independent Auto Service database...", expanded=True) as status:
             for item in estimate_data.get("repairs", []):
@@ -363,7 +405,7 @@ if uploaded_file is not None:
                             
                 # Add the absolute BEST result we found to the total
                 if isinstance(Independent_price, (int, float)):
-                    total_Independent += Independent_price
+                    total_independent += Independent_price
                 
                 comparison_results.append({
                     "Service": service_name.title(),
@@ -390,8 +432,8 @@ if uploaded_file is not None:
                 st.warning("⚠️ **No Dealership Prices Detected**")
                 st.write("We successfully read the recommended repairs, but we didn't find any quoted prices on the document you uploaded.")
                 
-                if total_Independent > 0:
-                    st.success(f"Good news! We went ahead and pulled Independent Auto Service's estimates anyway. We estimate this work will cost around **${total_Independent:.2f}**.")
+                if total_independent > 0:
+                    st.success(f"Good news! We went ahead and pulled Independent Auto Service's estimates anyway. We estimate this work will cost around **${total_independent:.2f}**.")
                     show_form = True
                     alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Independent estimate: ${Independent_total:.2f}."
                 else:
@@ -400,17 +442,35 @@ if uploaded_file is not None:
                     alert_msg_template = "New Lead! {name} ({phone}) needs a custom quote for a {vehicle} (unpriced upload)."
 
             # Scenario B: Standard Comparison & Savings
-            elif total_Independent > 0 and total_dealer > total_Independent:
-                savings = total_dealer - total_Independent
+            elif total_independent > 0 and total_dealer > total_independent:
+                savings = total_dealer - total_independent
                 st.success(f"🎉 We estimate we can save you around **${savings:.2f}** on these repairs!")
                 show_form = True
                 alert_msg_template = "New Lead! {name} ({phone}) wants a second opinion on a {vehicle}. Estimated savings: ${savings:.2f}."
+                
+                # --- NEW: PDF Download Button ---
+                st.write("---")
+                st.write("**Save a copy of this estimate for your records:**")
+                
+                # Generate the PDF bytes
+                vehicle_name = estimate_data.get('vehicle', 'Unknown Vehicle')
+                pdf_bytes = create_pdf_report(vehicle_name, comparison_results, total_dealer, total_independent, savings)
+                
+                # Create the Streamlit download button
+                st.download_button(
+                    label="📄 Download Estimate as PDF",
+                    data=pdf_bytes,
+                    file_name=f"Independent_Auto_Estimate_{vehicle_name.replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
+                st.write("---")
 
             # Scenario C: Dealership is somehow cheaper or exactly the same
-            elif total_Independent > 0 and total_dealer > 0 and total_dealer <= total_Independent:
+            elif total_independent > 0 and total_dealer > 0 and total_dealer <= total_independent:
                 st.info("It looks like the dealership quote is highly competitive for these specific services.")
                 show_form = True
                 alert_msg_template = "New Lead! {name} ({phone}) checked prices for a {vehicle}. Dealer quote was competitive."
+
 
             # --- Lead Capture Form ---
             if show_form:
@@ -432,9 +492,9 @@ if uploaded_file is not None:
                             
                             # 2. Format the SMS string based on which scenario triggered the form
                             if "savings" in alert_msg_template:
-                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_Independent))
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_independent))
                             elif "Independent_total" in alert_msg_template:
-                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, Independent_total=total_Independent)
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, Independent_total=total_independent)
                             else:
                                 alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name)
                             
