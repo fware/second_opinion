@@ -9,6 +9,9 @@ import time
 import os
 import difflib  # used for fuzzy string comparisons
 import io
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from pypdf import PdfReader
 
 
@@ -309,6 +312,79 @@ def create_pdf_report(vehicle_name, comparison_results, total_dealer, total_inde
     # Output the PDF as a byte string (required for Streamlit's download button)
     return pdf.output(dest='S').encode('latin-1')    
 
+def send_sms_alert(to_phone_number, message_body):
+    """
+    Sends an SMS notification using Twilio.
+    Returns True if successful, False if it fails.
+    """
+    try:
+        # Pull credentials from Streamlit secrets
+        account_sid = st.secrets["TWILIO_ACCOUNT_SID"]
+        auth_token = st.secrets["TWILIO_AUTH_TOKEN"]
+        from_phone = st.secrets["TWILIO_PHONE_NUMBER"]
+
+        # Initialize the Twilio client
+        client = Client(account_sid, auth_token)
+
+        # Send the message
+        message = client.messages.create(
+            body=message_body,
+            from_=from_phone,
+            to=to_phone_number
+        )
+        
+        # Log the success for debugging
+        print(f"DEBUG: SMS sent successfully! Message SID: {message.sid}")
+        return True
+
+    except Exception as e:
+        print(f"DEBUG: Failed to send SMS. Error: {e}")
+        return False
+
+def send_email_alert(customer_name, customer_phone, alert_msg):
+    """
+    Sends an email notification using Python's built-in smtplib.
+    Returns True if successful, False if it fails.
+    """
+    try:
+        sender_email = st.secrets["SMTP_EMAIL"]
+        sender_password = st.secrets["SMTP_PASSWORD"]
+        receiver_email = st.secrets["RECEIVER_EMAIL"]
+
+        # 1. Construct the Email structure
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = f"🚨 New Lead: Independent Auto Estimate - {customer_name}"
+
+        # 2. Build the body of the email
+        body = f"""
+        You have a new lead from the Second Opinion Engine!
+        
+        Customer Name: {customer_name}
+        Phone Number: {customer_phone}
+        
+        Details:
+        {alert_msg}
+        """
+        msg.attach(MIMEText(body, 'plain'))
+
+        # 3. Connect to the SMTP server (Gmail uses port 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls() # Upgrade the connection to a secure TLS encrypted connection
+        server.login(sender_email, sender_password)
+        
+        # 4. Send and close
+        server.send_message(msg)
+        server.quit()
+        
+        print("DEBUG: Email sent successfully!")
+        return True
+
+    except Exception as e:
+        print(f"DEBUG: Failed to send Email. Error: {e}")
+        return False
+        
 # --- Utility Helpers ---
 def service_matches_with_score(db_service: str, service_name: str, threshold: float = 0.6):
     """Returns a tuple: (is_match, confidence_string)"""
@@ -435,7 +511,7 @@ if uploaded_file is not None:
                 if total_independent > 0:
                     st.success(f"Good news! We went ahead and pulled Independent Auto Service's estimates anyway. We estimate this work will cost around **${total_independent:.2f}**.")
                     show_form = True
-                    alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Independent estimate: ${Independent_total:.2f}."
+                    alert_msg_template = "New Lead! {name} ({phone}) uploaded an unpriced estimate for a {vehicle}. Independent estimate: ${total_independent:.2f}."
                 else:
                     st.info("Independent Auto Service will need to provide a custom quote for these specific items.")
                     show_form = True
@@ -493,15 +569,24 @@ if uploaded_file is not None:
                             # 2. Format the SMS string based on which scenario triggered the form
                             if "savings" in alert_msg_template:
                                 alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, savings=(total_dealer - total_independent))
-                            elif "Independent_total" in alert_msg_template:
-                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, Independent_total=total_independent)
+                            elif "total_independent" in alert_msg_template:
+                                alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name, total_independent=total_independent)
                             else:
                                 alert_msg = alert_msg_template.format(name=customer_name, phone=customer_phone, vehicle=vehicle_name)
                             
                             # 3. Trigger the notification (Make sure you have the send_sms_alert function defined in your script!)
-                            # send_sms_alert("+14695582111", alert_msg) 
-                            
-                            st.success("Success! Independent Auto Service has received your estimate. They will text or call you shortly.")
+                            # Replace the hardcoded number with your verified test number for the demo!
+
+                            demo_phone_number = "+14695582111"
+
+                            with st.spinner("Sending lead to the shop..."):
+                                # send_sms_alert(demo_phone_number, alert_msg)
+                                email_success = send_email_alert(customer_name, customer_phone, alert_msg)
+
+                            if email_success:                           
+                                st.success("Success! Independent Auto Service has received your estimate. They will text or call you shortly.")
+                            else:
+                                st.warning("We saved your information, but the SMS alert system is currently offline.")
                         else:
                             st.warning("Please provide your name and phone number.")
 
