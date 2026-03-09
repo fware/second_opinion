@@ -455,11 +455,10 @@ if uploaded_file is not None:
                 service_name = item.get("service", "").lower()
                 dealer_price = item.get("quoted_price", 0.0)
                 # st.write(f"Processing: {service_name.title()} - Dealer Quote: ${dealer_price:.2f}") # Debug line to show each service being processed
-                total_dealer += dealer_price
 
 
                 best_score = 0
-                Independent_price = "Custom Quote Needed"
+                independent_price = "Custom Quote Needed"
                 confidence_label = "No Match 🔴"                
                 # Check EVERY item in the database, don't just stop at the first one
                 for db_service, db_price in MOCK_PRICING_DB.items():
@@ -472,7 +471,7 @@ if uploaded_file is not None:
                     # If this match is BETTER than the last one we found, overwrite it
                     if is_match and current_weight > best_score:
                         best_score = current_weight
-                        Independent_price = db_price
+                        independent_price = db_price
                         confidence_label = conf_score
                         
                         # If we hit a perfect 3, we don't need to keep searching
@@ -480,13 +479,15 @@ if uploaded_file is not None:
                             break
                             
                 # Add the absolute BEST result we found to the total
-                if isinstance(Independent_price, (int, float)):
-                    total_independent += Independent_price
+                if isinstance(independent_price, (int, float)):
+                    total_independent += independent_price
+                    total_dealer += dealer_price    # I want to only total services when we also have an independent estimate
+
                 
                 comparison_results.append({
                     "Service": service_name.title(),
                     "Dealer Quote": f"${dealer_price:.2f}" if dealer_price > 0 else "Unpriced",
-                    "Independent Estimate": f"${Independent_price:.2f}" if isinstance(Independent_price, (int, float)) else Independent_price,
+                    "Independent Estimate": f"${independent_price:.2f}" if isinstance(independent_price, (int, float)) else independent_price,
                     "Match Confidence": confidence_label
                 })
             status.update(label="Comparison Complete!", state="complete", expanded=True)
