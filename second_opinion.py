@@ -4,6 +4,7 @@ from google.genai.errors import ClientError
 from fpdf import FPDF
 import pandas as pd
 import PIL.Image
+import base64
 import json
 import time
 import os
@@ -27,7 +28,7 @@ def load_pricing_db():
     Streamlit will automatically reload this if pricing.csv is modified!
     """
     try:
-        df = pd.read_csv("pricing.csv", skipinitialspace=True)
+        df = pd.read_csv("pricing/pricing.csv", skipinitialspace=True)
 
         # Clean up any accidental spaces in the column names
         # df.columns = df.columns.str.strip()
@@ -90,9 +91,9 @@ st.title("🚗 Independent Auto Service: Second Opinion")
 st.markdown("Upload your  estimate to see if we can beat their price.")
 
 # --- Core Functions ---
-def extract_text_from_pdf(uploaded_file):
+def extract_text_from_pdf(input_file):
     """Extracts raw text from the uploaded PDF."""
-    reader = PdfReader(uploaded_file)
+    reader = PdfReader(input_file)
     text = ""
     for page in reader.pages:
         text += page.extract_text() + "\n"
@@ -408,23 +409,44 @@ def service_matches_with_score(db_service: str, service_name: str, threshold: fl
     return False, "None 🔴"
 
 
-# Update the file uploader to accept images
-uploaded_file = st.file_uploader(
-    "Upload Dealership Estimate (PDF or Photo)", 
-    type=["pdf", "jpg", "jpeg", "png"]
-)
+# --- UI: Input Selection ---
+tab1, tab2 = st.tabs(["📁 Upload File", "📸 Take a Photo"])
+
+with tab1:
+    uploaded_file = st.file_uploader(
+        "Upload Dealership Estimate (PDF or Photo)", 
+        type=["pdf", "jpg", "jpeg", "png"]
+    )
+
+with tab2:
+    camera_file = st.camera_input("Take a clear picture of the estimate")
+
+
+# Unify the input so the rest of your app doesn't have to change!
+active_file = uploaded_file or camera_file
+
 
 # --- Initialize Streamlit Multi-File Memory ---
 if "estimate_cache" not in st.session_state:
     # Create an empty dictionary to hold all processed files
     st.session_state.estimate_cache = {}
 
-if uploaded_file is not None:
-    file_name = uploaded_file.name
+if active_file is not None:
+    file_name = active_file.name
     
-    # Preview the image if it's a photo
-    if uploaded_file.type != "application/pdf":
-        st.image(uploaded_file, caption="Uploaded Estimate", width='stretch')
+    # --- UI: File Preview ---
+    if active_file.type != "application/pdf":
+        # It's an image
+        st.image(active_file, caption="Uploaded Estimate", use_container_width=True) 
+    else:
+        # It's a PDF
+        st.write("**Uploaded Estimate:**")
+        # Read the file bytes and encode to base64
+        base64_pdf = base64.b64encode(active_file.getvalue()).decode('utf-8')
+        # Embed the PDF using HTML
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    # ------------------------
 
     # 1. Check if we have already processed THIS specific file today
     if file_name in st.session_state.estimate_cache:
@@ -434,12 +456,12 @@ if uploaded_file is not None:
     # 2. If it's a new file, call the AI and save it to the dictionary
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
-            file_bytes = uploaded_file.getvalue()
-            estimate_data = parse_document_with_llm_v2(file_bytes, uploaded_file.type)
+            file_bytes = active_file.getvalue()
+            estimate_data = parse_document_with_llm_v2(file_bytes, active_file.type)
             
-            # Save it to memory so we never process this filename again this session
+            # Save it to memory to in case it the same file gets uploaded again in this session.
             if estimate_data:
-                st.session_state.estimate_cache[file_name] = estimate_data  
+                st.session_state.estimate_cache[file_name] = estimate_data
 
     # 3. Proceed normally!                  
     if estimate_data:
