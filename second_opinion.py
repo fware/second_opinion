@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_back_camera_input import back_camera_input
 from google import genai
 from google.genai.errors import ClientError
 from fpdf import FPDF
@@ -419,7 +420,11 @@ with tab1:
     )
 
 with tab2:
-    camera_file = st.camera_input("Take a clear picture of the estimate")
+    #camera_file = st.camera_input("Take a clear picture of the estimate")
+    st.write("Take a clear picture of the estimate:")
+    # This custom widget forces the rear camera by default
+    camera_file = back_camera_input()
+
 
 
 # Unify the input so the rest of your app doesn't have to change!
