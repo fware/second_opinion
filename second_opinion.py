@@ -23,22 +23,15 @@ st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_i
 # --- UI: White-Label CSS ---
 hide_streamlit_style = """
     <style>
-    /* Hides the top-right hamburger menu */
-    #MainMenu {visibility: hidden !important;}
-    
-    /* Hides the 'Made with Streamlit' footer */
-    footer {visibility: hidden !important;}
+    /* Hides the entire top-right toolbar (Hamburger menu, Deploy button, etc.) */
+    [data-testid="stToolbar"] {visibility: hidden !important;}
     
     /* Hides the top header bar completely */
     [data-testid="stHeader"] {display: none !important;}
     
-    /* Hides the 'Hosted with Streamlit' teardrop badge */
-    [data-testid="viewerBadge"] {display: none !important;}
-    .viewerBadge_container {display: none !important;}
-    
-    /* Hides the 'Manage App' or 'Deploy' floating buttons */
-    [data-testid="stAppDeployButton"] {display: none !important;}
-    .stDeployButton {display: none !important;}
+    /* Hides the entire bottom area (Streamlit watermark, footer, etc.) */
+    [data-testid="stBottom"] {display: none !important;}
+    footer {visibility: hidden !important;}
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
