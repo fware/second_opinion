@@ -20,6 +20,25 @@ from pypdf import PdfReader
 # --- Configuration & Setup ---
 st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
 
+# --- Configuration & Setup ---
+st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
+
+# --- UI: White-Label CSS ---
+hide_streamlit_style = """
+    <style>
+    /* Hides the top-right hamburger menu */
+    #MainMenu {visibility: hidden;}
+    
+    /* Hides the 'Made with Streamlit' footer */
+    footer {visibility: hidden;}
+    
+    /* Hides the top header bar completely */
+    header {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# ---------------------------
+
 
 # --- Mock Database for Independent Shop Pricing ---
 @st.cache_data
