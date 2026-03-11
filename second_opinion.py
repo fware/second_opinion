@@ -437,17 +437,31 @@ if "estimate_cache" not in st.session_state:
     st.session_state.estimate_cache = {}
 
 if active_file is not None:
-    file_name = active_file.name
-    
+    # --- NEW: Normalize the file properties based on the input source ---
+    if hasattr(active_file, 'name'):
+        # It came from the standard file uploader
+        file_name = active_file.name
+        file_type = active_file.type
+        file_bytes = active_file.getvalue()
+    else:
+        # It came from the custom camera widget (raw BytesIO stream)
+        file_bytes = active_file.getvalue()
+        
+        # Hash the image bytes to create a stable, unique file name for the cache!
+        import hashlib
+        file_hash = hashlib.md5(file_bytes).hexdigest()
+        file_name = f"camera_capture_{file_hash}.jpg"
+        file_type = "image/jpeg"
+
     # --- UI: File Preview ---
-    if active_file.type != "application/pdf":
+    if file_type != "application/pdf":
         # It's an image
-        st.image(active_file, caption="Uploaded Estimate", use_container_width=True) 
+        st.image(file_bytes, caption="Uploaded Estimate", use_container_width=True) 
     else:
         # It's a PDF
         st.write("**Uploaded Estimate:**")
         # Read the file bytes and encode to base64
-        base64_pdf = base64.b64encode(active_file.getvalue()).decode('utf-8')
+        base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
         # Embed the PDF using HTML
         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
         st.markdown(pdf_display, unsafe_allow_html=True)
@@ -455,19 +469,19 @@ if active_file is not None:
 
     # 1. Check if we have already processed THIS specific file today
     if file_name in st.session_state.estimate_cache:
-        st.success(f"⚡ Loaded {file_name} from cache! (Saved an API call)")
+        st.success(f"⚡ Loaded estimate from cache! (Saved an API call)")
         estimate_data = st.session_state.estimate_cache[file_name]
 
     # 2. If it's a new file, call the AI and save it to the dictionary
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
-            file_bytes = active_file.getvalue()
-            estimate_data = parse_document_with_llm_v2(file_bytes, active_file.type)
+            # Notice we pass file_bytes and file_type here now!
+            estimate_data = parse_document_with_llm_v2(file_bytes, file_type)
             
-            # Save it to memory to in case it the same file gets uploaded again in this session.
+            # Save it to memory so we never process this exact file again this session
             if estimate_data:
-                st.session_state.estimate_cache[file_name] = estimate_data
-
+                st.session_state.estimate_cache[file_name] = estimate_data  
+                
     # 3. Proceed normally!                  
     if estimate_data:
         st.success(f"Estimate parsed successfully for: **{estimate_data.get('vehicle', 'Unknown Vehicle')}**")
