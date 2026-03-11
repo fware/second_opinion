@@ -387,7 +387,7 @@ def send_email_alert(customer_name, customer_phone, alert_msg):
         return False
         
 # --- Utility Helpers ---
-def service_matches_with_score(db_service: str, service_name: str, threshold: float = 0.75):
+def service_matches_with_score(db_service: str, service_name: str, threshold: float = 0.5):
     """Returns a tuple: (is_match, confidence_string)"""
     db = db_service.lower()
     name = service_name.lower()
@@ -484,7 +484,7 @@ if active_file is not None:
                 confidence_label = "No Match 🔴"                
                 # Check EVERY item in the database, don't just stop at the first one
                 for db_service, db_price in MOCK_PRICING_DB.items():
-                    is_match, conf_score = service_matches_with_score(db_service, service_name, threshold=0.8)
+                    is_match, conf_score = service_matches_with_score(db_service, service_name, threshold=0.5)
                     
                     # Convert your emoji labels into a mathematical weight
                     weight_map = {"High 🟢": 3, "Good 🟡": 2, "Partial 🟠": 1, "None 🔴": 0}
