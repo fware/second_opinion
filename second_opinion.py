@@ -24,16 +24,21 @@ st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_i
 hide_streamlit_style = """
     <style>
     /* Hides the top-right hamburger menu */
-    #MainMenu {visibility: hidden;}
+    #MainMenu {visibility: hidden !important;}
     
     /* Hides the 'Made with Streamlit' footer */
-    footer {visibility: hidden;}
+    footer {visibility: hidden !important;}
     
     /* Hides the top header bar completely */
-    header {visibility: hidden;}
+    [data-testid="stHeader"] {display: none !important;}
     
-    /* Hides the 'Hosted with Streamlit' teardrop badge in the bottom right */
-    [data-testid="viewerBadge"] {display: none;}
+    /* Hides the 'Hosted with Streamlit' teardrop badge */
+    [data-testid="viewerBadge"] {display: none !important;}
+    .viewerBadge_container {display: none !important;}
+    
+    /* Hides the 'Manage App' or 'Deploy' floating buttons */
+    [data-testid="stAppDeployButton"] {display: none !important;}
+    .stDeployButton {display: none !important;}
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
