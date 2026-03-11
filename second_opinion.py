@@ -360,9 +360,9 @@ def send_sms_alert(to_phone_number, message_body):
         print(f"DEBUG: Failed to send SMS. Error: {e}")
         return False
 
-def send_email_alert(customer_name, customer_phone, alert_msg):
+def send_email_alert(customer_name, customer_phone, alert_msg, html_table=""):
     """
-    Sends an email notification using Python's built-in smtplib.
+    Sends an HTML email notification using Python's built-in smtplib.
     Returns True if successful, False if it fails.
     """
     try:
@@ -370,40 +370,49 @@ def send_email_alert(customer_name, customer_phone, alert_msg):
         sender_password = st.secrets["SMTP_PASSWORD"]
         receiver_email = st.secrets["RECEIVER_EMAIL"]
 
-        # 1. Construct the Email structure
         msg = MIMEMultipart()
         msg['From'] = sender_email
         msg['To'] = receiver_email
         msg['Subject'] = f"🚨 New Lead: Independent Auto Estimate - {customer_name}"
 
-        # 2. Build the body of the email
+        # Build the HTML body of the email
         body = f"""
-        You have a new lead from the Second Opinion Engine!
-        
-        Customer Name: {customer_name}
-        Phone Number: {customer_phone}
-        
-        Details:
-        {alert_msg}
+        <html>
+            <head>
+                <style>
+                    table {{border-collapse: collapse; width: 100%; font-family: sans-serif;}}
+                    th, td {{border: 1px solid #dddddd; text-align: left; padding: 8px;}}
+                    th {{background-color: #f2f2f2;}}
+                </style>
+            </head>
+            <body>
+                <h2 style="color: #2e6c80;">New Lead from the Second Opinion Engine!</h2>
+                <p><strong>Customer Name:</strong> {customer_name}</p>
+                <p><strong>Phone Number:</strong> {customer_phone}</p>
+                <p><strong>Details:</strong> {alert_msg}</p>
+                <hr>
+                <h3>Estimate Breakdown:</h3>
+                {html_table}
+            </body>
+        </html>
         """
-        msg.attach(MIMEText(body, 'plain'))
-
-        # 3. Connect to the SMTP server (Gmail uses port 587)
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls() # Upgrade the connection to a secure TLS encrypted connection
-        server.login(sender_email, sender_password)
         
-        # 4. Send and close
+        # Attach as HTML
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
         server.send_message(msg)
         server.quit()
         
-        print("DEBUG: Email sent successfully!")
+        print("DEBUG: HTML Email sent successfully!")
         return True
 
     except Exception as e:
         print(f"DEBUG: Failed to send Email. Error: {e}")
         return False
-        
+
 # --- Utility Helpers ---
 def service_matches_with_score(db_service: str, service_name: str, threshold: float = 0.5):
     """Returns a tuple: (is_match, confidence_string)"""
@@ -649,7 +658,12 @@ if active_file is not None:
 
                             with st.spinner("Sending lead to the shop..."):
                                 # send_sms_alert(demo_phone_number, alert_msg)
-                                email_success = send_email_alert(customer_name, customer_phone, alert_msg)
+
+                                # Convert the DataFrame to a clean HTML string, hiding the row numbers (index)
+                                table_html = df.to_html(index=False, justify='left')
+
+                                # Call the updated email function
+                                email_success = send_email_alert(customer_name, customer_phone, alert_msg, html_table=table_html)
 
                             if email_success:                           
                                 st.success("Success! Independent Auto Service has received your estimate. They will text or call you shortly.")
