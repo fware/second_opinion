@@ -527,7 +527,6 @@ if active_file is not None:
                 dealer_price = item.get("quoted_price", 0.0)
                 # st.write(f"Processing: {service_name.title()} - Dealer Quote: ${dealer_price:.2f}") # Debug line to show each service being processed
 
-
                 best_score = 0
                 independent_price = "Custom Quote Needed"
                 confidence_label = "No Match 🔴"                
@@ -548,13 +547,24 @@ if active_file is not None:
                         # If we hit a perfect 3, we don't need to keep searching
                         if best_score == 3:
                             break
-                            
+
+                # ==========================================                            
+                # --- NEW: SALES DEMO FILTERING LOGIC ---
+                # 1. Skip if the Dealership didn't provide a quoted price
+                if dealer_price <= 0:
+                    continue
+
+                # 2. Skip if the Dealership price is cheaper than the Independent quote
+                if isinstance(independent_price, (int, float)) and dealer_price <= independent_price:
+                    continue
+                # ==========================================
+
                 # Add the absolute BEST result we found to the total
                 if isinstance(independent_price, (int, float)):
                     total_independent += independent_price
                     total_dealer += dealer_price    # I want to only total services when we also have an independent estimate
 
-                # --- NEW: Truncate long service names for the UI display ---
+                # --- Truncate long service names for the UI display ---
                 display_service_name = service_name.title()
                 if len(display_service_name) > 40:
                     display_service_name = display_service_name[:37] + "..."
@@ -562,7 +572,7 @@ if active_file is not None:
                 
                 comparison_results.append({
                     "Service": display_service_name, # <-- Use the truncated variable here
-                    "Dealer Quote": f"${dealer_price:.2f}" if dealer_price > 0 else "Unpriced",
+                    "Dealer Quote": f"${dealer_price:.2f}", # We removed the "Unpriced" fallback since we filter those out now
                     "Independent Estimate": f"${independent_price:.2f}" if isinstance(independent_price, (int, float)) else independent_price,
                     "Match Confidence": confidence_label
                 })
