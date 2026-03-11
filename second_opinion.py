@@ -31,8 +31,7 @@ hide_streamlit_style = """
     
     /* Hides the top header bar completely */
     header {visibility: hidden;}
-    </style>
-
+    
     /* Hides the 'Hosted with Streamlit' teardrop badge in the bottom right */
     [data-testid="viewerBadge"] {display: none;}
     </style>
