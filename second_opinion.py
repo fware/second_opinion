@@ -541,9 +541,14 @@ if active_file is not None:
                     total_independent += independent_price
                     total_dealer += dealer_price    # I want to only total services when we also have an independent estimate
 
+                # --- NEW: Truncate long service names for the UI display ---
+                display_service_name = service_name.title()
+                if len(display_service_name) > 40:
+                    display_service_name = display_service_name[:37] + "..."
+                # ----------------------------------------------------------
                 
                 comparison_results.append({
-                    "Service": service_name.title(),
+                    "Service": display_service_name, # <-- Use the truncated variable here
                     "Dealer Quote": f"${dealer_price:.2f}" if dealer_price > 0 else "Unpriced",
                     "Independent Estimate": f"${independent_price:.2f}" if isinstance(independent_price, (int, float)) else independent_price,
                     "Match Confidence": confidence_label
