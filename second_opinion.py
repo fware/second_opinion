@@ -20,9 +20,6 @@ from pypdf import PdfReader
 # --- Configuration & Setup ---
 st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
 
-# --- Configuration & Setup ---
-st.set_page_config(page_title="Independent Auto Service: Second Opinion", page_icon="🚗", layout="centered")
-
 # --- UI: White-Label CSS ---
 hide_streamlit_style = """
     <style>
