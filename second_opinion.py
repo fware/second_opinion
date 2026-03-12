@@ -485,16 +485,12 @@ if active_file is not None:
 
     # --- UI: File Preview ---
     if file_type != "application/pdf":
-        # It's an image
+        # It's an image - Mobile browsers render images perfectly!
         st.image(file_bytes, caption="Uploaded Estimate", use_container_width=True) 
     else:
-        # It's a PDF
-        st.write("**Uploaded Estimate:**")
-        # Read the file bytes and encode to base64
-        base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
-        # Embed the PDF using HTML
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        # It's a PDF - Mobile browsers block PDF iframes, so we show a clean success message instead
+        st.info(f"📄 **PDF Document Uploaded Successfully:** `{file_name}`")
+        st.write("*Analyzing document contents...*")
     # ------------------------
 
     # 1. Check if we have already processed THIS specific file today
