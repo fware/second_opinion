@@ -316,7 +316,8 @@ def parse_document_with_llm_v2(file_bytes, file_type):
 
 @st.cache_data(show_spinner=False)
 def parse_sophisticated_estimate_with_llm(file_bytes, file_type):
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY"))
     
     prompt = f"""
     You are an expert Automotive Service Estimator. Your goal is to parse raw text from a dealership 
