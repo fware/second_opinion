@@ -314,108 +314,6 @@ def parse_document_with_llm_v2(file_bytes, file_type):
         return None
 
 
-@st.cache_data(show_spinner=False)
-def parse_sophisticated_estimate_with_llm(file_bytes, file_type):
-    
-    client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY"))
-    
-    prompt = f"""
-    You are an expert Automotive Service Estimator. Your goal is to parse raw text from a dealership 
-    repair estimate and normalize it for a comparison tool.
-
-    ### RULES:
-    1. GROUPING: If labor and parts for the same repair (e.g., 'Brake Pads' and 'Brake Labor') are listed 
-    separately, COMBINE them into a single service item.
-    2. CLEANING: Remove internal dealership codes (e.g., 'OP CODE 02LEXZ').
-    3. PRICING: Sum the labor and parts for the combined service. Ensure the price is a float.
-    4. UNCERTAINTY: If a line item is a "Recommendation" but has no price, include it with a price of 
-    0.0.
-
-    ### OUTPUT FORMAT:
-    Return ONLY a valid JSON object:
-    {{
-        "vehicle": "Year, Make, and Model",
-        "repairs": [
-            {{
-                "service": "Clear, concise name of the repair",
-                "total_dealer_price": 0.00,
-                "is_bundled": true/false (true if you combined parts and labor)
-            }}
-        ]
-    }}
-    """
-    
-    max_retries = 3
-    base_delay = 2 
-
-    for attempt in range(max_retries):
-        try:
-            # 2. Route based on file type using the new client syntax
-            if file_type == "application/pdf":
-                # Assuming extract_text_from_pdf can accept raw bytes via io.BytesIO
-                import io
-                raw_text = extract_text_from_pdf(io.BytesIO(file_bytes))
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[prompt, raw_text]
-                )
-            else:
-                import io
-                import PIL.Image
-                img = PIL.Image.open(io.BytesIO(file_bytes))
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[prompt, img]
-                )
-            
-            break # Break out of loop if successful
-            
-        except ClientError as e:
-            # 3. Catch the new 429 Rate Limit Error
-            if e.code == 429:
-                if attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt) 
-                    st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
-                    import time
-                    time.sleep(sleep_time)
-                else:
-                    st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
-                    return None
-            else:
-                st.error(f"API Error: {e.message}")
-                return None
-        except Exception as e:
-            st.error(f"An unexpected error occurred: {e}")
-            return None
-    
-    # 4. JSON parsing logic stays exactly the same!
-    try:
-        raw_json_string = response.text.strip()
-        
-        if raw_json_string.startswith("```json"):
-            raw_json_string = raw_json_string[7:]
-        if raw_json_string.endswith("```"):
-            raw_json_string = raw_json_string[:-3]
-            
-        import json
-        parsed_dict = json.loads(raw_json_string.strip())
-        
-        if not isinstance(parsed_dict, dict):
-            parsed_dict = {}
-
-        if "vehicle" not in parsed_dict or not parsed_dict["vehicle"]:
-            parsed_dict["vehicle"] = "Unknown Vehicle"
-            
-        if "repairs" not in parsed_dict:
-            parsed_dict["repairs"] = []
-            
-        return parsed_dict
-
-    except Exception as e:
-        st.error("Failed to parse AI response. The document might be too blurry or unreadable.")
-        return None
-
-
 def create_pdf_report(vehicle_name, comparison_results, total_dealer, total_independent, savings):
     """Generates a PDF estimate and returns it as raw bytes for Streamlit to download."""
     pdf = FPDF()
@@ -631,7 +529,7 @@ if active_file is not None:
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
             # Notice we pass file_bytes and file_type here now!
-            estimate_data = parse_sophisticated_estimate_with_llm(file_bytes, file_type)
+            estimate_data = parse_estimate_with_llm(file_bytes, file_type)
             
             # Save it to memory so we never process this exact file again this session
             if estimate_data:
