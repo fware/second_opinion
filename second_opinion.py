@@ -137,7 +137,6 @@ def parse_estimate_with_llm(file_bytes, file_type):
     }}
     
     Raw text from estimate:
-    {raw_text}
     """
     
     max_retries = 3
