@@ -630,7 +630,7 @@ if active_file is not None:
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
             # Notice we pass file_bytes and file_type here now!
-            estimate_data = parse_estimate_with_llm(file_bytes, file_type)
+            estimate_data = parse_sophisticated_estimate_with_llm(file_bytes, file_type)
             
             # Save it to memory so we never process this exact file again this session
             if estimate_data:
