@@ -123,8 +123,9 @@ def parse_estimate_with_llm(raw_text):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
-    You are an expert automotive service advisor. I am providing you with the raw text extracted from a car repair estimate PDF.
-    Your job is to identify the vehicle make and model, and list the recommended repairs along with their quoted prices.
+    You are an expert automotive service advisor. I am providing you with the raw text extracted 
+    from a car repair estimate, either in PDF or a digital image. Your job is to identify the 
+    vehicle make and model, and list the recommended repairs along with their quoted prices.
     
     Return ONLY a valid JSON object with the following structure:
     {{
@@ -157,15 +158,18 @@ def parse_document_with_llm_v2(file_bytes, file_type):
     client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY"))
     
     prompt = """
-    You are an expert Automotive Service Estimator. Extract the vehicle information and repair line items from the provided document.
+    You are an expert Automotive Service Estimator. Extract the vehicle information and 
+    repair line items from the provided document.
     
     RULES:
-    1. Identify the Year, Make, and Model of the vehicle. Combine them into a single string (e.g., "2015 Lexus CT200h"). 
-       If you cannot find this information, you MUST use the exact string: "Unknown Vehicle".
+    1. Identify the Year, Make, and Model of the vehicle. Combine them into a single string 
+    (e.g., "2015 Lexus CT200h"). If you cannot find this information, you MUST use the 
+    exact string: "Unknown Vehicle".
     2. Combine separated labor and parts into a single service item if they belong together.
     3. Ensure quoted_price is always a number/float (e.g., 150.00) without currency symbols.
 
-    You MUST return ONLY a valid JSON object matching this exact structure, with no markdown formatting or extra text:
+    You MUST return ONLY a valid JSON object matching this exact structure, with no markdown 
+    formatting or extra text:
     {
         "vehicle": "Year Make Model",
         "repairs": [
@@ -252,13 +256,16 @@ def parse_sophisticated_estimate_with_llm(raw_text):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
-    You are an expert Automotive Service Estimator. Your goal is to parse raw text from a dealership repair estimate and normalize it for a comparison tool.
+    You are an expert Automotive Service Estimator. Your goal is to parse raw text from a dealership 
+    repair estimate and normalize it for a comparison tool.
 
     ### RULES:
-    1. GROUPING: If labor and parts for the same repair (e.g., 'Brake Pads' and 'Brake Labor') are listed separately, COMBINE them into a single service item.
+    1. GROUPING: If labor and parts for the same repair (e.g., 'Brake Pads' and 'Brake Labor') are listed 
+    separately, COMBINE them into a single service item.
     2. CLEANING: Remove internal dealership codes (e.g., 'OP CODE 02LEXZ').
     3. PRICING: Sum the labor and parts for the combined service. Ensure the price is a float.
-    4. UNCERTAINTY: If a line item is a "Recommendation" but has no price, include it with a price of 0.0.
+    4. UNCERTAINTY: If a line item is a "Recommendation" but has no price, include it with a price of 
+    0.0.
 
     ### OUTPUT FORMAT:
     Return ONLY a valid JSON object:
@@ -502,7 +509,7 @@ if active_file is not None:
     else:
         with st.spinner("Extracting current estimate data and calculating our price..."):
             # Notice we pass file_bytes and file_type here now!
-            estimate_data = parse_document_with_llm_v2(file_bytes, file_type)
+            estimate_data = parse_estimate_with_llm(file_bytes, file_type)
             
             # Save it to memory so we never process this exact file again this session
             if estimate_data:
