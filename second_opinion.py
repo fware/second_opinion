@@ -118,9 +118,10 @@ def extract_text_from_pdf(input_file):
     return text
 
 
-def parse_estimate_with_llm(raw_text):
+@st.cache_data(show_spinner=False)
+def parse_estimate_with_llm(file_bytes, file_type):
     """Uses Gen AI to convert unstructured PDF text into structured JSON."""
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY"))
     
     prompt = f"""
     You are an expert automotive service advisor. I am providing you with the raw text extracted 
@@ -139,14 +140,76 @@ def parse_estimate_with_llm(raw_text):
     {raw_text}
     """
     
+    max_retries = 3
+    base_delay = 2 
+
+    for attempt in range(max_retries):
+        try:
+            # 2. Route based on file type using the new client syntax
+            if file_type == "application/pdf":
+                # Assuming extract_text_from_pdf can accept raw bytes via io.BytesIO
+                import io
+                raw_text = extract_text_from_pdf(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, raw_text]
+                )
+            else:
+                import io
+                import PIL.Image
+                img = PIL.Image.open(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, img]
+                )
+            
+            break # Break out of loop if successful
+            
+        except ClientError as e:
+            # 3. Catch the new 429 Rate Limit Error
+            if e.code == 429:
+                if attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt) 
+                    st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(sleep_time)
+                else:
+                    st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
+                    return None
+            else:
+                st.error(f"API Error: {e.message}")
+                return None
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
+            return None
+    
+    # 4. JSON parsing logic stays exactly the same!
     try:
-        response = model.generate_content(prompt)
-        # Clean up the response to ensure it's pure JSON (removing markdown blocks if present)
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
-        return json.loads(cleaned_response)
+        raw_json_string = response.text.strip()
+        
+        if raw_json_string.startswith("```json"):
+            raw_json_string = raw_json_string[7:]
+        if raw_json_string.endswith("```"):
+            raw_json_string = raw_json_string[:-3]
+            
+        import json
+        parsed_dict = json.loads(raw_json_string.strip())
+        
+        if not isinstance(parsed_dict, dict):
+            parsed_dict = {}
+
+        if "vehicle" not in parsed_dict or not parsed_dict["vehicle"]:
+            parsed_dict["vehicle"] = "Unknown Vehicle"
+            
+        if "repairs" not in parsed_dict:
+            parsed_dict["repairs"] = []
+            
+        return parsed_dict
+
     except Exception as e:
-        st.error(f"Error parsing estimate: {e}")
+        st.error("Failed to parse AI response. The document might be too blurry or unreadable.")
         return None
+
 
 @st.cache_data(show_spinner=False)
 def parse_document_with_llm_v2(file_bytes, file_type):
@@ -252,7 +315,8 @@ def parse_document_with_llm_v2(file_bytes, file_type):
         return None
 
 
-def parse_sophisticated_estimate_with_llm(raw_text):
+@st.cache_data(show_spinner=False)
+def parse_sophisticated_estimate_with_llm(file_bytes, file_type):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
@@ -279,18 +343,76 @@ def parse_sophisticated_estimate_with_llm(raw_text):
             }}
         ]
     }}
-
-    ### RAW TEXT:
-    {raw_text}
     """
     
+    max_retries = 3
+    base_delay = 2 
+
+    for attempt in range(max_retries):
+        try:
+            # 2. Route based on file type using the new client syntax
+            if file_type == "application/pdf":
+                # Assuming extract_text_from_pdf can accept raw bytes via io.BytesIO
+                import io
+                raw_text = extract_text_from_pdf(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, raw_text]
+                )
+            else:
+                import io
+                import PIL.Image
+                img = PIL.Image.open(io.BytesIO(file_bytes))
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[prompt, img]
+                )
+            
+            break # Break out of loop if successful
+            
+        except ClientError as e:
+            # 3. Catch the new 429 Rate Limit Error
+            if e.code == 429:
+                if attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt) 
+                    st.warning(f"⏳ API rate limit hit. Pausing for {sleep_time} seconds before retrying... (Attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(sleep_time)
+                else:
+                    st.error("🚨 API Quota completely exceeded. Please try again tomorrow or upgrade your Gemini API plan.")
+                    return None
+            else:
+                st.error(f"API Error: {e.message}")
+                return None
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
+            return None
+    
+    # 4. JSON parsing logic stays exactly the same!
     try:
-        response = model.generate_content(prompt)
-        # Handle cases where LLM might wrap response in markdown code blocks
-        json_str = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(json_str)
+        raw_json_string = response.text.strip()
+        
+        if raw_json_string.startswith("```json"):
+            raw_json_string = raw_json_string[7:]
+        if raw_json_string.endswith("```"):
+            raw_json_string = raw_json_string[:-3]
+            
+        import json
+        parsed_dict = json.loads(raw_json_string.strip())
+        
+        if not isinstance(parsed_dict, dict):
+            parsed_dict = {}
+
+        if "vehicle" not in parsed_dict or not parsed_dict["vehicle"]:
+            parsed_dict["vehicle"] = "Unknown Vehicle"
+            
+        if "repairs" not in parsed_dict:
+            parsed_dict["repairs"] = []
+            
+        return parsed_dict
+
     except Exception as e:
-        st.error(f"Logic Error: {e}")
+        st.error("Failed to parse AI response. The document might be too blurry or unreadable.")
         return None
 
 
