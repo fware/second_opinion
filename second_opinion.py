@@ -596,7 +596,7 @@ if active_file is not None:
                 # ----------------------------------------------------------
                 
                 comparison_results.append({
-                    "Service": best_db_service, 
+                    "Service": best_db_service.title(), 
                     "Dealer Quote": f"${dealer_price:.2f}", # We removed the "Unpriced" fallback since we filter those out now
                     "Independent Estimate": f"${independent_price:.2f}" if isinstance(independent_price, (int, float)) else independent_price,
                     "Match Confidence": confidence_label
