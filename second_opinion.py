@@ -211,7 +211,7 @@ def parse_estimate_with_llm(file_bytes, file_type):
 
 
 @st.cache_data(show_spinner=False)
-def parse_document_with_llm_v2(file_bytes, file_type):
+def parse_estimate_with_llm_v2(file_bytes, file_type):
     """
     Parses a PDF or Image estimate and returns a structured Python Dictionary.
     Updated to use the new google-genai SDK.
@@ -552,7 +552,8 @@ if active_file is not None:
 
                 best_score = 0
                 independent_price = "Custom Quote Needed"
-                confidence_label = "No Match 🔴"                
+                confidence_label = "No Match 🔴"
+                best_db_service = "Unknown Service"                
                 # Check EVERY item in the database, don't just stop at the first one
                 for db_service, db_price in MOCK_PRICING_DB.items():
                     is_match, conf_score = service_matches_with_score(db_service, service_name)
@@ -566,6 +567,7 @@ if active_file is not None:
                         best_score = current_weight
                         independent_price = db_price
                         confidence_label = conf_score
+                        best_db_service = db_service
                         
                         # If we hit a perfect 3, we don't need to keep searching
                         if best_score == 3:
@@ -594,7 +596,7 @@ if active_file is not None:
                 # ----------------------------------------------------------
                 
                 comparison_results.append({
-                    "Service": display_service_name, # <-- Use the truncated variable here
+                    "Service": best_db_service, 
                     "Dealer Quote": f"${dealer_price:.2f}", # We removed the "Unpriced" fallback since we filter those out now
                     "Independent Estimate": f"${independent_price:.2f}" if isinstance(independent_price, (int, float)) else independent_price,
                     "Match Confidence": confidence_label
